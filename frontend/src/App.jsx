@@ -1,9 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
+
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
+import PracticePage from './pages/PracticePage';
 
 function ProtectedRoute({ children }) {
   const { token } = useAuthStore();
@@ -20,11 +22,15 @@ export default function App() {
         <nav className="bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg">
           <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
             <h1 className="text-2xl font-bold">🎯 PitchPerfect</h1>
+
             <div className="space-x-4">
               {token ? (
                 <>
-                  <a href="/dashboard" className="hover:text-blue-100">Dashboard</a>
-                  <button 
+                  <Link to="/dashboard" className="hover:text-blue-100">
+                    Dashboard
+                  </Link>
+
+                  <button
                     onClick={() => {
                       logout();
                       window.location.href = '/';
@@ -36,8 +42,16 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <a href="/login" className="hover:text-blue-100">Login</a>
-                  <a href="/signup" className="bg-white text-blue-600 px-4 py-2 rounded hover:bg-blue-50">Sign Up</a>
+                  <Link to="/login" className="hover:text-blue-100">
+                    Login
+                  </Link>
+
+                  <Link
+                    to="/signup"
+                    className="bg-white text-blue-600 px-4 py-2 rounded hover:bg-blue-50"
+                  >
+                    Sign Up
+                  </Link>
                 </>
               )}
             </div>
@@ -47,15 +61,27 @@ export default function App() {
         {/* Routes */}
         <Routes>
           <Route path="/" element={<HomePage />} />
+
           <Route path="/login" element={<LoginPage />} />
+
           <Route path="/signup" element={<SignupPage />} />
-          <Route 
-            path="/dashboard" 
+
+          <Route
+            path="/dashboard"
             element={
               <ProtectedRoute>
                 <DashboardPage />
               </ProtectedRoute>
-            } 
+            }
+          />
+
+          <Route
+            path="/practice/:scenarioType"
+            element={
+              <ProtectedRoute>
+                <PracticePage />
+              </ProtectedRoute>
+            }
           />
         </Routes>
       </div>

@@ -3,21 +3,25 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const authRoutes = require('./routes/auth');  // ← THIS LINE
+const authRoutes = require('./routes/auth');
+const pitchRoutes = require('./routes/pitch');
 
 const app = express();
 
 // Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? 'https://yourdomain.com' 
+  origin: process.env.NODE_ENV === 'production'
+    ? 'https://yourdomain.com'
     : 'http://localhost:5173',
   credentials: true,
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB
+// MongoDB Connection
+console.log(process.env.MONGO_URI);
+console.log(process.env.TEST);
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log('MongoDB connected successfully!');
@@ -27,30 +31,37 @@ mongoose.connect(process.env.MONGO_URI)
     process.exit(1);
   });
 
-// Routes
+// Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'Server is running!',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-app.use('/api/auth', authRoutes);  // ← THIS LINE
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/pitch', pitchRoutes);
 
-// Error handlers
+// 404 Handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({
+    error: 'Route not found',
+  });
 });
 
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  res.status(err.status || 500).json({ 
-    error: err.message || 'Server error' 
+
+  res.status(err.status || 500).json({
+    error: err.message || 'Server error',
   });
 });
 
-// Start server
+// Start Server
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
   console.log(`PitchPerfect backend running on http://localhost:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
