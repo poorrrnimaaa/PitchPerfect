@@ -2,7 +2,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ChatWindow from '../components/ChatWindow';
 import ScoreCard from '../components/ScoreCard';
+import Icon from '../components/Icon';
 import API from '../api/config';
+
+const scenarios = {
+  startup: { title: 'Startup pitch', description: 'Present your startup idea to an investor.', partner: 'Seed investor', context: 'You’re meeting an early-stage investor for the first time. Make the problem, opportunity, and your advantage easy to understand.' },
+  'product-demo': { title: 'Product demo', description: 'Showcase your product to a potential customer.', partner: 'Product buyer', context: 'A potential customer is evaluating whether your product solves a meaningful problem for their team.' },
+  fundraising: { title: 'Fundraising', description: 'Practice raising capital with confidence.', partner: 'VC partner', context: 'You’re discussing your raise with a venture partner who wants to understand traction, ambition, and capital efficiency.' },
+};
 
 export default function PracticePage() {
   const { scenarioType } = useParams();
@@ -14,88 +21,25 @@ export default function PracticePage() {
 
   useEffect(() => {
     const startPitch = async () => {
-      try {
-        const response = await API.post('/pitch/start', { scenarioType });
-        setPitchId(response.data.pitchId);
-      } catch (error) {
-        console.error('Error starting pitch:', error);
-        alert('Error starting pitch session');
-        navigate('/dashboard');
-      } finally {
-        setLoading(false);
-      }
+      try { const response = await API.post('/pitch/start', { scenarioType }); setPitchId(response.data.pitchId); }
+      catch (error) { console.error(error); navigate('/dashboard'); }
+      finally { setLoading(false); }
     };
     startPitch();
   }, [scenarioType, navigate]);
 
-  const handleComplete = (result) => {
-    setScores(result.scores);
-    setFeedback(result.feedback);
-  };
+  const handleComplete = (result) => { setScores(result.scores); setFeedback(result.feedback); };
+  const current = scenarios[scenarioType] || scenarios.startup;
 
-  const getScenarioTitle = () => {
-    const titles = {
-      startup: '🚀 Startup Pitch',
-      'product-demo': '💼 Product Demo',
-      'fundraising': '💰 Fundraising Pitch',
-    };
-    return titles[scenarioType] || 'Pitch Practice';
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Starting pitch session...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <main className="session-loading"><div className="session-loader"><span><Icon name="sparkles" size={23}/></span><h2>Preparing your session</h2><p>Setting the context for your AI partner…</p><div><i/><i/><i/></div></div></main>;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">{getScenarioTitle()}</h1>
-        <p className="text-gray-600">Practice your pitch. Respond naturally to questions and feedback.</p>
-      </div>
+    <main className="practice-page">
+      <div className="container practice-container">
+        <header className="practice-header"><button onClick={() => navigate('/dashboard')} className="back-button"><Icon name="arrowLeft" size={18}/> Dashboard</button><div className="practice-title"><div><span className="session-status"><i/> Practice session</span><h1>{current.title}</h1><p>{current.description}</p></div>{!scores && <div className="session-partner"><span className="avatar avatar--ai">P</span><div><small>Your conversation partner</small><strong>{current.partner}</strong></div></div>}</div></header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          {pitchId && !scores && (
-            <ChatWindow
-              pitchId={pitchId}
-              scenarioType={scenarioType}
-              onComplete={handleComplete}
-            />
-          )}
-          {scores && (
-            <div className="space-y-4">
-              <ScoreCard scores={scores} feedback={feedback} />
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
-              >
-                Back to Dashboard
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="lg:col-span-1">
-          <div className="bg-white p-6 rounded-lg shadow sticky top-4">
-            <h3 className="font-bold text-lg mb-4">📝 Tips</h3>
-            <ul className="space-y-3 text-sm text-gray-700">
-              <li>✓ Speak clearly and confidently</li>
-              <li>✓ Use specific examples</li>
-              <li>✓ Address objections directly</li>
-              <li>✓ Keep responses concise</li>
-              <li>✓ Show enthusiasm</li>
-              <li>✓ Have data to back claims</li>
-            </ul>
-          </div>
-        </div>
+        {!scores ? <div className="practice-grid"><section className="chat-card">{pitchId && <ChatWindow pitchId={pitchId} scenarioType={scenarioType} partner={current.partner} onComplete={handleComplete}/>}</section><aside className="session-sidebar"><div className="session-info-card"><span className="eyebrow">Scenario</span><h3>Set the scene</h3><p>{current.context}</p></div><div className="session-info-card"><span className="eyebrow">Keep in mind</span><ul className="goals-list"><li><span>01</span><p><strong>Be direct</strong>Lead with your core point.</p></li><li><span>02</span><p><strong>Use evidence</strong>Support claims with specifics.</p></li><li><span>03</span><p><strong>Stay present</strong>Answer the question being asked.</p></li></ul></div><div className="evaluation-note"><Icon name="shield" size={18}/><p>Your session is evaluated on <strong>delivery, confidence, logic, and persuasion.</strong></p></div></aside></div> : <div className="score-page-wrap"><ScoreCard scores={scores} feedback={feedback}/><div className="score-actions"><button onClick={() => navigate('/dashboard')} className="button button--secondary"><Icon name="arrowLeft" size={17}/> Back to dashboard</button><button onClick={() => window.location.reload()} className="button button--primary">Practice again <Icon name="arrowRight" size={17}/></button></div></div>}
       </div>
-    </div>
+    </main>
   );
 }

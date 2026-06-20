@@ -1,32 +1,33 @@
 const Pitch = require('../models/Pitch');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generativeai');
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
 function getScenarioPrompt(scenarioType) {
   const prompts = {
-    startup: `You are a tough investor listening to a startup pitch.
-Ask challenging questions about the business model, market size, and competition.
-Be realistic but fair.
-Keep responses concise (1-2 sentences).`,
-
+    startup: `You are a tough investor listening to a startup pitch. 
+    Ask challenging questions about the business model, market size, and competition.
+    Be realistic but fair. Ask follow-up questions.
+    Keep responses concise (1-2 sentences).
+    Stay in character as an investor.`,
+    
     'product-demo': `You are a potential customer considering this product.
-Ask about features, pricing, and alternatives.
-Be realistic and somewhat skeptical.
-Keep responses concise (1-2 sentences).`,
-
-    fundraising: `You are a venture capitalist reviewing an investment.
-Ask about unit economics, team experience, and competitive advantages.
-Be professional but tough.
-Keep responses concise (1-2 sentences).`,
+    Ask about features, pricing, and if it's better than alternatives.
+    Be realistic and somewhat skeptical.
+    Keep responses concise (1-2 sentences).
+    Stay in character as a customer.`,
+    
+    'fundraising': `You are a venture capitalist reviewing an investment.
+    Ask about unit economics, team experience, and competitive advantages.
+    Be professional but tough.
+    Keep responses concise (1-2 sentences).
+    Stay in character as a VC.`,
   };
-
+  
   return prompts[scenarioType] || prompts.startup;
 }
 
-// START PITCH
 exports.startPitch = async (req, res) => {
   try {
     const { scenarioType } = req.body;
@@ -44,212 +45,213 @@ exports.startPitch = async (req, res) => {
 
     await pitch.save();
 
-    const prompt = `
-You are starting a ${scenarioType.replace('-', ' ')} pitch session.
+    try {
+      const prompt = `You are starting a ${scenarioType.replace('-', ' ')} pitch session.
+      ${getScenarioPrompt(scenarioType)}
+      
+      Give a brief opening (2-3 sentences).`;
 
-${getScenarioPrompt(scenarioType)}
+      const result = await model.generateContent(prompt);
+      const aiMessage = result.response.text();
 
-Give a brief opening message and ask the first question.
-`;
+      pitch.messages.push({
+        sender: 'ai',
+        text: aiMessage,
+      });
 
-    const aiMessage = "Welcome to PitchPerfect! Please introduce your startup/product in 60 seconds.";
+      await pitch.save();
 
-    await pitch.save();
-
-    res.status(201).json({
-      pitchId: pitch._id,
-      message: aiMessage,
-    });
+      res.status(201).json({
+        pitchId: pitch._id,
+        message: aiMessage,
+      });
+    } catch (geminiError) {
+      console.error('Gemini API error:', geminiError);
+      res.status(500).json({ error: 'Error generating AI response' });
+    }
   } catch (error) {
     console.error('Start pitch error:', error);
-    res.status(500).json({
-      error: 'Error starting pitch session',
-    });
+    res.status(500).json({ error: 'Error starting pitch session' });
   }
 };
 
-// SEND MESSAGE
 exports.sendMessage = async (req, res) => {
   try {
-    const pitchId = req.params.pitchId;
-    const { message } = req.body;
+    const { pitchId, message } = req.body;
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
 
     const pitch = await Pitch.findById(pitchId);
-
     if (!pitch) {
-      return res.status(404).json({
-        error: 'Pitch not found',
-      });
+      return res.status(404).json({ error: 'Pitch not found' });
+    }
+
+    if (pitch.status !== 'ongoing') {
+      return res.status(400).json({ error: 'Pitch session is completed' });
     }
 
     pitch.messages.push({
       sender: 'user',
-      text: message,
+      text: message.trim(),
     });
 
     const conversationText = pitch.messages
-      .map(
-        (msg) =>
-          `${msg.sender === 'user' ? 'User' : 'AI'}: ${msg.text}`
-      )
+      .map(msg => `${msg.sender === 'user' ? 'User' : 'AI'}: ${msg.text}`)
       .join('\n\n');
 
-    const prompt = `
-${getScenarioPrompt(pitch.scenarioType)}
+    try {
+      const prompt = `${getScenarioPrompt(pitch.scenarioType)}
+      
+      Conversation so far:
+      ${conversationText}
+      
+      Continue as the character. Ask a follow-up question (1-2 sentences).`;
 
-Conversation:
+      const result = await model.generateContent(prompt);
+      const aiMessage = result.response.text();
 
-${conversationText}
+      pitch.messages.push({
+        sender: 'ai',
+        text: aiMessage,
+      });
 
-Continue the conversation naturally and ask a follow-up question.
-`;
+      await pitch.save();
 
-    const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: prompt,
-    });
-
-    const aiMessage = "Interesting. Can you explain your target customers and revenue model?";
-
-    await pitch.save();
-
-    res.json({
-      message: aiMessage,
-      messageCount: pitch.messages.length,
-    });
+      res.json({
+        message: aiMessage,
+        messageCount: pitch.messages.length,
+      });
+    } catch (geminiError) {
+      console.error('Gemini API error:', geminiError);
+      res.status(500).json({ error: 'Error generating AI response' });
+    }
   } catch (error) {
     console.error('Send message error:', error);
-    res.status(500).json({
-      error: 'Error sending message',
-    });
+    res.status(500).json({ error: 'Error sending message' });
   }
 };
 
-// GET PITCH
 exports.getPitch = async (req, res) => {
   try {
     const pitch = await Pitch.findById(req.params.pitchId);
-
     if (!pitch) {
-      return res.status(404).json({
-        error: 'Pitch not found',
-      });
+      return res.status(404).json({ error: 'Pitch not found' });
     }
-
     res.json(pitch);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      error: 'Error fetching pitch',
-    });
+    res.status(500).json({ error: 'Error fetching pitch' });
   }
 };
 
-// COMPLETE PITCH
 exports.completePitch = async (req, res) => {
   try {
     const pitch = await Pitch.findById(req.params.pitchId);
-
     if (!pitch) {
-      return res.status(404).json({
-        error: 'Pitch not found',
-      });
+      return res.status(404).json({ error: 'Pitch not found' });
+    }
+
+    if (pitch.status === 'completed') {
+      return res.status(400).json({ error: 'Pitch already completed' });
     }
 
     const transcript = pitch.messages
-      .map(
-        (msg) =>
-          `${msg.sender === 'user' ? 'User' : 'AI'}: ${msg.text}`
-      )
+      .map(msg => `${msg.sender === 'user' ? 'User' : 'AI'}: ${msg.text}`)
       .join('\n\n');
 
-    const scoringPrompt = `
-Analyze this pitch practice session.
+    try {
+      const scoringPrompt = `Analyze this pitch practice session and score the user on 0-100 scale.
 
 Transcript:
 ${transcript}
 
-Return ONLY valid JSON:
-
+Respond ONLY with valid JSON (no markdown):
 {
-  "delivery": 85,
-  "confidence": 80,
-  "logic": 90,
-  "persuasion": 82,
-  "overall": 84,
-  "feedback": "Short feedback"
-}
-`;
+  "delivery": <number>,
+  "confidence": <number>,
+  "logic": <number>,
+  "persuasion": <number>,
+  "overall": <number>,
+  "feedback": "<text>"
+}`;
 
-    const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: scoringPrompt,
-    });
+      const result = await model.generateContent(scoringPrompt);
+      let scoreText = result.response.text().trim();
 
-    let scoreText = result.text.trim();
+      // Clean markdown if present
+      if (scoreText.includes('```')) {
+        scoreText = scoreText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      }
 
-    scoreText = scoreText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim();
+      let scores;
+      try {
+        scores = JSON.parse(scoreText);
+      } catch (e) {
+        console.warn('Failed to parse scores, using defaults');
+        scores = {
+          delivery: 75,
+          confidence: 75,
+          logic: 75,
+          persuasion: 75,
+          overall: 75,
+          feedback: 'Good practice session! Keep working on your pitch skills.'
+        };
+      }
 
-    let scores;
+      pitch.scores = {
+        delivery: Math.min(100, Math.max(0, parseInt(scores.delivery) || 75)),
+        confidence: Math.min(100, Math.max(0, parseInt(scores.confidence) || 75)),
+        logic: Math.min(100, Math.max(0, parseInt(scores.logic) || 75)),
+        persuasion: Math.min(100, Math.max(0, parseInt(scores.persuasion) || 75)),
+        overall: Math.min(100, Math.max(0, parseInt(scores.overall) || 75)),
+      };
+      pitch.feedback = scores.feedback || 'Great practice session!';
+      pitch.status = 'completed';
+      pitch.completedAt = new Date();
 
-    try {
-      scores = JSON.parse(scoreText);
-    } catch {
-      scores = {
-        delivery: 70,
-        confidence: 70,
+      await pitch.save();
+
+      res.json({
+        scores: pitch.scores,
+        feedback: pitch.feedback,
+      });
+    } catch (geminiError) {
+      console.error('Gemini scoring error:', geminiError);
+      
+      // Return fallback scores
+      const fallbackScores = {
+        delivery: 75,
+        confidence: 75,
         logic: 75,
         persuasion: 75,
-        overall: 72,
-        feedback: 'Good effort! Keep practicing.',
+        overall: 75,
       };
+      pitch.scores = fallbackScores;
+      pitch.feedback = 'Session completed! Keep practicing to improve.';
+      pitch.status = 'completed';
+      pitch.completedAt = new Date();
+      await pitch.save();
+
+      res.json({
+        scores: pitch.scores,
+        feedback: pitch.feedback,
+      });
     }
-
-    pitch.scores = {
-      delivery: scores.delivery || 70,
-      confidence: scores.confidence || 70,
-      logic: scores.logic || 75,
-      persuasion: scores.persuasion || 75,
-      overall: scores.overall || 72,
-    };
-
-    pitch.feedback =
-      scores.feedback || 'Good practice session!';
-
-    pitch.status = 'completed';
-    pitch.completedAt = new Date();
-
-    await pitch.save();
-
-    res.json({
-      scores: pitch.scores,
-      feedback: pitch.feedback,
-    });
   } catch (error) {
     console.error('Complete pitch error:', error);
-
-    res.status(500).json({
-      error: 'Error completing pitch',
-    });
+    res.status(500).json({ error: 'Error completing pitch' });
   }
 };
 
-// USER PITCHES
 exports.getUserPitches = async (req, res) => {
   try {
-    const pitches = await Pitch.find({
-      userId: req.user.userId,
-    }).sort({ createdAt: -1 });
-
+    const pitches = await Pitch.find({ userId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .limit(20);
     res.json(pitches);
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      error: 'Error fetching pitches',
-    });
+    console.error('Get pitches error:', error);
+    res.status(500).json({ error: 'Error fetching pitches' });
   }
 };
