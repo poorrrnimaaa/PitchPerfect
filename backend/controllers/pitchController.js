@@ -1,44 +1,84 @@
 const Pitch = require('../models/Pitch');
-const { GoogleGenerativeAI } = require('@google/generativeai');
+const { GoogleGenAI } = require('@google/genai');
+const { getScenarioById } = require('../../shared/scenarios.cjs');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
-function getScenarioPrompt(scenarioType) {
-  const prompts = {
-    startup: `You are a tough investor listening to a startup pitch. 
-    Ask challenging questions about the business model, market size, and competition.
-    Be realistic but fair. Ask follow-up questions.
-    Keep responses concise (1-2 sentences).
-    Stay in character as an investor.`,
-    
-    'product-demo': `You are a potential customer considering this product.
-    Ask about features, pricing, and if it's better than alternatives.
-    Be realistic and somewhat skeptical.
-    Keep responses concise (1-2 sentences).
-    Stay in character as a customer.`,
-    
-    'fundraising': `You are a venture capitalist reviewing an investment.
-    Ask about unit economics, team experience, and competitive advantages.
-    Be professional but tough.
-    Keep responses concise (1-2 sentences).
-    Stay in character as a VC.`,
+async function generateAIText(prompt) {
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: prompt,
+  });
+
+  return response.text;
+}
+
+function normalizeSetup(body) {
+  const scenarioType = body.scenarioType || body.selectedScenario;
+  const scenario = getScenarioById(scenarioType);
+
+  if (!scenario) {
+    return null;
+  }
+
+  return {
+    selectedScenario: scenario.id,
+    scenarioType: scenario.id,
+    roleApplyingFor: body.roleApplyingFor || scenario.defaultRole,
+    experienceLevel: body.experienceLevel || 'Fresher',
+    companyType: body.companyType || 'Startup',
+    difficulty: body.difficulty || scenario.difficulty,
+    interviewerPersonality: body.interviewerPersonality || scenario.aiPersonality,
+    interviewDuration: body.interviewDuration || scenario.estimatedDuration,
+    additionalContext: body.additionalContext || '',
+    scenario,
   };
-  
-  return prompts[scenarioType] || prompts.startup;
+}
+
+function buildSystemPrompt(pitch) {
+  const scenario = getScenarioById(pitch.selectedScenario || pitch.scenarioType);
+  const role = pitch.roleApplyingFor || scenario?.defaultRole || 'Candidate';
+  const experience = pitch.experienceLevel || 'Fresher';
+  const company = pitch.companyType || 'Startup';
+  const difficulty = pitch.difficulty || scenario?.difficulty || 'Medium';
+  const personality = pitch.interviewerPersonality || scenario?.aiPersonality || 'Professional Interviewer';
+  const duration = pitch.interviewDuration || scenario?.estimatedDuration || '10-15 min';
+  const context = pitch.additionalContext ? `Additional context from the user: ${pitch.additionalContext}` : 'No additional context was provided.';
+
+  return `${scenario?.systemPrompt || 'You are a professional communication practice partner.'}
+
+Act as: ${personality}.
+Scenario: ${scenario?.title || pitch.scenarioType}.
+Candidate or speaker role: ${role}.
+Experience level: ${experience}.
+Company or conversation type: ${company}.
+Difficulty: ${difficulty}.
+Target duration: ${duration}.
+${context}
+
+Adapt every question to these setup choices. Keep responses concise, realistic, and in character. Ask one focused follow-up at a time.`;
 }
 
 exports.startPitch = async (req, res) => {
   try {
-    const { scenarioType } = req.body;
+    const setup = normalizeSetup(req.body);
 
-    if (!['startup', 'product-demo', 'fundraising'].includes(scenarioType)) {
+    if (!setup) {
       return res.status(400).json({ error: 'Invalid scenario type' });
     }
 
     const pitch = new Pitch({
       userId: req.user.userId,
-      scenarioType,
+      scenarioType: setup.scenarioType,
+      selectedScenario: setup.selectedScenario,
+      roleApplyingFor: setup.roleApplyingFor,
+      experienceLevel: setup.experienceLevel,
+      companyType: setup.companyType,
+      difficulty: setup.difficulty,
+      interviewerPersonality: setup.interviewerPersonality,
+      interviewDuration: setup.interviewDuration,
+      additionalContext: setup.additionalContext,
       messages: [],
       status: 'ongoing',
     });
@@ -46,13 +86,14 @@ exports.startPitch = async (req, res) => {
     await pitch.save();
 
     try {
-      const prompt = `You are starting a ${scenarioType.replace('-', ' ')} pitch session.
-      ${getScenarioPrompt(scenarioType)}
-      
-      Give a brief opening (2-3 sentences).`;
+      const prompt = `${buildSystemPrompt(pitch)}
 
-      const result = await model.generateContent(prompt);
-      const aiMessage = result.response.text();
+Start the session with this scenario opening if it fits naturally:
+"${setup.scenario.openingPrompt}"
+
+Give a brief opening in 2-3 sentences, then ask the first question.`;
+
+      const aiMessage = await generateAIText(prompt);
 
       pitch.messages.push({
         sender: 'ai',
@@ -77,7 +118,8 @@ exports.startPitch = async (req, res) => {
 
 exports.sendMessage = async (req, res) => {
   try {
-    const { pitchId, message } = req.body;
+    const { pitchId } = req.params;
+    const { message } = req.body;
 
     if (!message || message.trim().length === 0) {
       return res.status(400).json({ error: 'Message cannot be empty' });
@@ -102,15 +144,14 @@ exports.sendMessage = async (req, res) => {
       .join('\n\n');
 
     try {
-      const prompt = `${getScenarioPrompt(pitch.scenarioType)}
+      const prompt = `${buildSystemPrompt(pitch)}
       
       Conversation so far:
       ${conversationText}
       
       Continue as the character. Ask a follow-up question (1-2 sentences).`;
 
-      const result = await model.generateContent(prompt);
-      const aiMessage = result.response.text();
+      const aiMessage = await generateAIText(prompt);
 
       pitch.messages.push({
         sender: 'ai',
@@ -161,7 +202,9 @@ exports.completePitch = async (req, res) => {
       .join('\n\n');
 
     try {
-      const scoringPrompt = `Analyze this pitch practice session and score the user on 0-100 scale.
+      const scoringPrompt = `${buildSystemPrompt(pitch)}
+
+Analyze this practice session and score the user on 0-100 scale.
 
 Transcript:
 ${transcript}
@@ -176,8 +219,7 @@ Respond ONLY with valid JSON (no markdown):
   "feedback": "<text>"
 }`;
 
-      const result = await model.generateContent(scoringPrompt);
-      let scoreText = result.response.text().trim();
+      let scoreText = (await generateAIText(scoringPrompt)).trim();
 
       // Clean markdown if present
       if (scoreText.includes('```')) {

@@ -20,8 +20,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // MongoDB Connection
-console.log(process.env.MONGO_URI);
-console.log(process.env.TEST);
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log('MongoDB connected successfully!');

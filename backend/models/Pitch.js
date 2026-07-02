@@ -1,4 +1,7 @@
 const mongoose = require('mongoose');
+const { practiceScenarios } = require('../../shared/scenarios.cjs');
+
+const scenarioIds = practiceScenarios.map((scenario) => scenario.id);
 
 const pitchSchema = new mongoose.Schema({
   userId: {
@@ -8,9 +11,17 @@ const pitchSchema = new mongoose.Schema({
   },
   scenarioType: {
     type: String,
-    enum: ['startup', 'product-demo', 'fundraising'],
+    enum: scenarioIds,
     required: true,
   },
+  selectedScenario: String,
+  roleApplyingFor: String,
+  experienceLevel: String,
+  companyType: String,
+  difficulty: String,
+  interviewerPersonality: String,
+  interviewDuration: String,
+  additionalContext: String,
   messages: [{
     sender: {
       type: String,
