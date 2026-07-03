@@ -11,7 +11,7 @@ const app = express();
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? 'pitch-perfect-black.vercel.app'
+    ? 'https://pitch-perfect-black.vercel.app'
     : 'http://localhost:5173',
   credentials: true,
 }));
